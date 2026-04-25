@@ -346,7 +346,7 @@ function optimize(gIn, cfgIn){
     for(const t of buildablePool(g3)) t.building=ROLES[Math.floor(Math.random()*ROLES.length)];
     for(let r=0;r<g3.rows;r++) for(let c=0;c<g3.cols;c++){
       const t=g3.tiles[r][c];
-      if(t.type===TILE.FOREST && cfg.chop && Math.random()<0.3){ t.chopped=true; t.building=null; }
+      if(t.cityId && t.type===TILE.FOREST && cfg.chop && Math.random()<0.3){ t.chopped=true; t.building=null; }
     }
     const s3=hillClimb(g3,cfg); if(s3>bestScore){ bestScore=s3; bestGrid=g3; }
   }

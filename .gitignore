@@ -1,0 +1,4 @@
+# Local-only files (don't push to GitHub)
+.claude/
+*.zip
+*.png

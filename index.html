@@ -491,10 +491,12 @@ function optimize(gIn){
   for(let trial=0;trial<80;trial++){
     const g3=cloneGrid(g);
     for(const t of buildablePool(g3)) t.building=RANDOM_ROLES[Math.floor(Math.random()*RANDOM_ROLES.length)];
-    // Randomize chop decisions on forests too
+    // Randomize chop decisions on forests too — but only inside city territory.
+    // Forests outside any city can't be chopped (you can't act there at all),
+    // and hillClimb's pool skips them, so a stray chop here would never get undone.
     for(let r=0;r<g3.rows;r++) for(let c=0;c<g3.cols;c++){
       const t=g3.tiles[r][c];
-      if(t.type===TILE.FOREST && Math.random()<0.3){ t.chopped=true; t.building=null; }
+      if(t.cityId && t.type===TILE.FOREST && Math.random()<0.3){ t.chopped=true; t.building=null; }
     }
     const s3=hillClimb(g3); if(s3>bestScore){bestScore=s3;bestGrid=g3;}
   }
@@ -619,8 +621,9 @@ function draw() {
   // runs, relocated cities, or paint actions pre-dating a city change).
   for (let r=0; r<grid.rows; r++) for (let c=0; c<grid.cols; c++) {
     const t = grid.tiles[r][c];
-    if (!t.cityId && t.type !== P.TILE.CITY && t.building) {
-      t.building = null; t.chopped = false;
+    if (!t.cityId && t.type !== P.TILE.CITY) {
+      if (t.building) t.building = null;
+      if (t.chopped)  t.chopped = false;
     }
   }
 
@@ -635,7 +638,7 @@ function draw() {
 
       // Diamond fill (translucent so screenshot shows through)
       diamondPath(ctx, cx, cy);
-      ctx.fillStyle = hexWithAlpha(p.color, 0.32);
+      ctx.fillStyle = hexWithAlpha(p.color, 0.55);
       ctx.fill();
       // City-territory outline (on top of fill, under buildings)
       if (showFlags.territory && t.cityId) {
