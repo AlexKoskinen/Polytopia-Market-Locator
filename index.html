@@ -79,6 +79,9 @@
     <div class="row"><label>Off Y</label><input type="range" id="offY" min="0" max="3000" value="40"/><span id="offYv">40</span></div>
     <button class="secondary" id="applyGrid">Apply grid</button>
     <button class="secondary" id="calibrate" style="margin-top:6px; width:100%">Calibrate (2 clicks)</button>
+    <label class="legend" style="display:flex; gap:6px; align-items:center; margin-top:6px; cursor:pointer">
+      <input type="checkbox" id="lockGrid"/> <span>Lock grid (drag pans the view instead of moving the grid)</span>
+    </label>
     <div class="legend" style="margin-top:4px">
       Click + drag to pan. Ctrl + wheel to zoom.<br/>
       Calibrate: click center of tile (0,0) — the <b>top</b> tile —
@@ -827,8 +830,9 @@ overlay.addEventListener('mousedown', e => {
   const py = (e.clientY - rect.top)  / viewZoom;
   const { r, c } = screenToTile(px, py);
   const overGrid = r>=0 && c>=0 && r<grid.rows && c<grid.cols;
+  const gridLocked = document.getElementById('lockGrid').checked;
   panStart = { x: e.clientX, y: e.clientY };
-  if (overGrid) {
+  if (overGrid && !gridLocked) {
     panMode = 'grid';
     panOrigin = { x: offX, y: offY };
   } else {
