@@ -49,7 +49,9 @@
 <body>
 <header>
   <h1>Polytopia Market Locator</h1>
-  <input type="file" id="file" accept="image/*" />
+  <input type="file" id="file" accept="image/*" style="display:none" />
+  <label for="file" class="action" style="cursor:pointer; background:#7ed957">📷 Choose screenshot</label>
+  <span id="fileName" class="legend" style="max-width:160px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap"></span>
   <button class="secondary" id="clearImg">No screenshot</button>
   <div class="stat">Stars/turn: <b id="stars">0</b></div>
   <div class="stat">Cities: <b id="cityCount" style="color:var(--warn)">0</b></div>
@@ -1048,8 +1050,14 @@ document.getElementById('file').addEventListener('change', e => {
   const url = URL.createObjectURL(f);
   bgImg.onload = () => { resizeStage(); draw(); };
   bgImg.src = url;
+  document.getElementById('fileName').textContent = f.name;
 });
-document.getElementById('clearImg').onclick = () => { bgImg.removeAttribute('src'); resizeStage(); draw(); };
+document.getElementById('clearImg').onclick = () => {
+  bgImg.removeAttribute('src');
+  document.getElementById('file').value = '';
+  document.getElementById('fileName').textContent = '';
+  resizeStage(); draw();
+};
 
 function readNum(id) { return parseInt(document.getElementById(id).value, 10); }
 document.getElementById('applyGrid').onclick = () => {
