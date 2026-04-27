@@ -58,7 +58,8 @@
   <div id="statusMsg" class="stat" style="display:none; background:#3a1e1e; color:var(--warn); border:1px solid var(--warn)"></div>
   <button class="action" id="runOpt">Find optimal markets</button>
   <button class="secondary" id="clearAssign">Clear suppliers/markets</button>
-  <button class="secondary" id="clearAll">Clear all</button>
+  <button class="secondary" id="clearAll">Clear grid</button>
+  <button class="secondary" id="removeGrid">Remove grid</button>
   <div class="stat" style="display:flex; gap:4px; align-items:center">
     Zoom
     <button class="secondary" id="zoomOut" style="padding:2px 8px">−</button>
@@ -71,21 +72,26 @@
 <main>
   <aside>
     <h2>Grid</h2>
-    <div class="row"><label>Rows</label><input type="number" id="rows" value="11" min="2" max="30"/></div>
-    <div class="row"><label>Cols</label><input type="number" id="cols" value="11" min="2" max="30"/></div>
-    <div class="row"><label>Tile W</label><input type="number" id="tileW" value="80" min="16" max="240"/></div>
-    <div class="row"><label>Tile H</label><input type="number" id="tileH" value="40" min="8"  max="160"/></div>
-    <div class="row"><label>Off X</label><input type="range" id="offX" min="0" max="3000" value="500"/><span id="offXv">500</span></div>
-    <div class="row"><label>Off Y</label><input type="range" id="offY" min="0" max="3000" value="40"/><span id="offYv">40</span></div>
-    <button class="secondary" id="applyGrid">Apply grid</button>
-    <button class="secondary" id="calibrate" style="margin-top:6px; width:100%">Calibrate (2 clicks)</button>
-    <label class="legend" style="display:flex; gap:6px; align-items:center; margin-top:6px; cursor:pointer">
+    <label class="legend" style="display:flex; gap:6px; align-items:center; margin-bottom:6px; cursor:pointer">
       <input type="checkbox" id="lockGrid"/> <span>Lock grid (drag pans the view instead of moving the grid)</span>
     </label>
+    <div class="row"><label>Rows</label><input type="number" id="rows" value="60" min="2" max="120"/></div>
+    <div class="row"><label>Cols</label><input type="number" id="cols" value="60" min="2" max="120"/></div>
+    <div class="row"><label>Tile W</label><input type="number" id="tileW" value="80" min="16" max="240"/></div>
+    <div class="row"><label>Tile H</label><input type="number" id="tileH" value="40" min="8"  max="160"/></div>
+    <div class="row"><label>Off X</label><input type="range" id="offX" min="-3000" max="3000" value="500"/><span id="offXv">500</span></div>
+    <div class="row"><label>Off Y</label><input type="range" id="offY" min="-3000" max="3000" value="40"/><span id="offYv">40</span></div>
+    <button class="action" id="calibrate" style="margin-top:6px; width:100%; background:#7ed957; color:#222">Auto-align grid (9 clicks)</button>
+    <div class="row" style="margin-top:6px"><label>Spacing</label><input type="number" id="calibSpacing" value="1" min="1" max="20"/><span class="legend">tiles between clicks (↑ for precision)</span></div>
+    <div style="display:flex; gap:8px; align-items:center; margin-top:6px">
+      <svg id="calibExample" width="120" height="120" viewBox="0 0 120 120" style="flex:0 0 auto; background:#1a1a1a; border-radius:4px"></svg>
+      <div class="legend" style="flex:1">
+        Click 9 tile centers arranged 3×3, in the order shown. Each adjacent pair of clicks must be exactly <b>Spacing</b> tiles apart along the iso axes (default 1 = adjacent tiles, as drawn).
+      </div>
+    </div>
+    <button class="action" id="addEmptyGrid" style="margin-top:6px; width:100%; background:#aaa; color:#222">Add grid manually</button>
     <div class="legend" style="margin-top:4px">
-      Click + drag to pan. Ctrl + wheel to zoom.<br/>
-      Calibrate: click center of tile (0,0) — the <b>top</b> tile —
-      then click the tile at <b>top-right edge</b> (row 0, last column).
+      Click + drag to pan. Ctrl + wheel to zoom.
     </div>
 
     <h2>Tool</h2>
@@ -511,8 +517,23 @@ const P = { TILE, BUILD, makeGrid, neighbors, validateBoard,
   supplierLevel, marketStars, totalStarsPerTurn, prefillResources, optimize, cloneGrid };
 
 // ---- State (isometric grid: tiles render as diamonds)
-let grid = P.makeGrid(11, 11);
-let tileW = 80, tileH = 40;     // diamond width/height in canvas (pre-zoom) px
+// Grid is intentionally over-sized (60×60 ≈ 4× the largest Polytopia preset
+// of 30×30) so the user never has to fit it to the actual board — paint what
+// matters, leave the rest as Field. Auto-align anchors the calibrating click
+// at the grid center so the user can paint in any direction from it.
+const AUTO_GRID_N = 60;
+const AUTO_ANCHOR = 30;          // tile (30,30) is where the first calibrate click lands
+let grid = P.makeGrid(AUTO_GRID_N, AUTO_GRID_N);
+// Grid is hidden until the user explicitly creates one (Add grid manually) or
+// runs Auto-align. This avoids a confusing default grid floating over the
+// screenshot before alignment happens.
+let gridReady = false;
+// Polytopia renders tiles with a fixed aspect ratio of ~1.677:1 (W:H),
+// independent of zoom and map size. Empirically measured across multiple
+// zooms (99/59 = 1.678, 109/65 = 1.677). Lock to this so calibration only
+// has to estimate scale, not aspect.
+const POLYTOPIA_WH_RATIO = 1.677;
+let tileW = 80, tileH = tileW / POLYTOPIA_WH_RATIO; // diamond width/height in canvas (pre-zoom) px
 let offX = 500, offY = 40;       // where tile (0,0)'s CENTER sits (canvas px)
 let paintType = P.TILE.FIELD;
 let viewZoom = 1.0;              // whole-stage CSS scale (screenshot + grid together)
@@ -618,6 +639,7 @@ function draw() {
   const lctx = labels.getContext('2d');
   ctx.clearRect(0,0,overlay.width,overlay.height);
   lctx.clearRect(0,0,labels.width,labels.height);
+  if (!gridReady) return;
   // Recompute city territory assignment so the "one market per city" rule and
   // territory tints reflect the current map (cheap; runs only on redraw).
   assignCities(grid);
@@ -808,14 +830,78 @@ function roundRect(ctx, x,y,w,h,r) {
 }
 
 // ---- Calibration state
-let calibStage = 0;            // 0=off, 1=waiting for tile(0,0), 2=waiting for tile(0,cols-1)
-let calibFirst = null;
+// Nine-click 3×3 long-baseline auto-align. The user clicks 9 tile centers
+// arranged in a 3×3 lattice with a known integer spacing K (in tiles) along
+// both row and column axes. Click order is row-major in iso (r,c) coords:
+//   1: (0,0)   2: (0,K)   3: (0,2K)
+//   4: (K,0)   5: (K,K)   6: (K,2K)
+//   7: (2K,0)  8: (2K,K)  9: (2K,2K)
+// In screen space this forms a parallelogram whose tips trace out the iso
+// "diamond" shape shown in the example SVG. The baseline (2K tiles in each
+// axis) divides click jitter; 9 clicks (vs. 2 in the old method) cuts the
+// remaining noise by a further ~√(9/2) on offX/offY.
+const CALIB_NEEDED = 9;
+let calibStage = 0;            // 0=off, 1..CALIB_NEEDED=waiting click N
+let calibClicks = [];          // array of {x, y} in canvas (pre-zoom) px
+let calibSpacing = 3;          // K — tiles between adjacent 3×3 clicks
 const calibBtn = document.getElementById('calibrate');
+const calibSpacingInput = document.getElementById('calibSpacing');
+const CALIB_LABEL = 'Auto-align grid (9 clicks)';
+function calibTilePositions(K) {
+  // Returns [{dr, dc}, ...] for the 9 clicks in row-major iso order.
+  const out = [];
+  for (let i=0; i<3; i++) for (let j=0; j<3; j++) out.push({ dr: i*K, dc: j*K });
+  return out;
+}
+function calibPromptLabel(stage, K) {
+  const pos = calibTilePositions(K)[stage - 1];
+  return `(row ${pos.dr/K}, col ${pos.dc/K} of 3×3)`;
+}
+function resetCalibBtn() {
+  calibBtn.textContent = CALIB_LABEL;
+  calibBtn.style.background = '#7ed957';
+  calibBtn.style.color = '#222';
+}
+function calibPromptText() {
+  return `${calibStage}/${CALIB_NEEDED}: click ${calibPromptLabel(calibStage, calibSpacing)}`;
+}
 calibBtn.onclick = () => {
-  calibStage = 1; calibFirst = null;
-  calibBtn.textContent = 'Calibrate: click top tile (0,0)';
+  const K = Math.max(1, parseInt(calibSpacingInput.value, 10) || 3);
+  calibSpacing = K;
+  calibStage = 1; calibClicks = [];
+  calibBtn.textContent = calibPromptText();
   calibBtn.style.background = '#ffcf4d'; calibBtn.style.color = '#222';
 };
+
+// Render the example SVG: 9 diamond tiles arranged as a 3×3 in iso (r,c)
+// coords (forming a larger diamond on screen), each marked with an X and a
+// number indicating click order. K=1 here for visual compactness — actual
+// click spacing is set by the user; the picture only conveys the *pattern*.
+(function drawCalibExample() {
+  const svg = document.getElementById('calibExample');
+  if (!svg) return;
+  const cx0 = 60, cy0 = 60;     // svg center
+  const tw = 26, th = tw / POLYTOPIA_WH_RATIO; // small iso tile in svg px
+  // Center the 3×3 (iso (1,1) is the middle tile) on the svg center.
+  const tileScreen = (r, c) => ({
+    x: cx0 + (c - r - 0) * (tw/2) - ( (1 - 1) * (tw/2) ),
+    y: cy0 + (c + r - 2) * (th/2)
+  });
+  // Draw each of the 9 diamonds + X + index.
+  let svgInner = '';
+  let idx = 1;
+  for (let r=0; r<3; r++) for (let c=0; c<3; c++) {
+    const { x, y } = tileScreen(r, c);
+    const pts = [
+      [x, y - th/2], [x + tw/2, y], [x, y + th/2], [x - tw/2, y]
+    ].map(p => p.join(',')).join(' ');
+    svgInner += `<polygon points="${pts}" fill="#2a2a2a" stroke="#888" stroke-width="1"/>`;
+    svgInner += `<circle cx="${x}" cy="${y + 2.5}" r="1.6" fill="#ff4d4d"/>`;
+    svgInner += `<text x="${x}" y="${y - 1}" text-anchor="middle" fill="#ffcf4d" font-size="7" font-family="monospace" font-weight="bold">${idx}</text>`;
+    idx++;
+  }
+  svg.innerHTML = svgInner;
+})();
 
 // ---- Drag:
 //   - Start inside grid  → move grid (offX/offY) over the background image
@@ -829,7 +915,7 @@ overlay.addEventListener('mousedown', e => {
   const px = (e.clientX - rect.left) / viewZoom;
   const py = (e.clientY - rect.top)  / viewZoom;
   const { r, c } = screenToTile(px, py);
-  const overGrid = r>=0 && c>=0 && r<grid.rows && c<grid.cols;
+  const overGrid = gridReady && r>=0 && c>=0 && r<grid.rows && c<grid.cols;
   const gridLocked = document.getElementById('lockGrid').checked;
   panStart = { x: e.clientX, y: e.clientY };
   if (overGrid && !gridLocked) {
@@ -917,39 +1003,97 @@ overlay.addEventListener('click', e => {
   const px = (e.clientX - rect.left) / viewZoom;
   const py = (e.clientY - rect.top)  / viewZoom;
 
-  if (calibStage === 1) {
-    calibFirst = { x: px, y: py };
-    calibStage = 2;
-    calibBtn.textContent = 'Calibrate: click tile (0, ' + (grid.cols-1) + ')';
-    return;
-  }
-  if (calibStage === 2) {
-    const x1 = calibFirst.x, y1 = calibFirst.y;
-    const x2 = px, y2 = py;
-    const n = grid.cols - 1;
-    if (n <= 0) { alert('Need at least 2 columns to calibrate.'); calibStage = 0; return; }
-    // Tile (0,0) center = (offX, offY). Tile (0,n) center = (offX + n*tileW/2, offY + n*tileH/2).
-    tileW = 2 * (x2 - x1) / n;
-    tileH = 2 * (y2 - y1) / n;
-    if (tileW <= 0 || tileH <= 0) {
-      alert('Calibration failed: second click must be to the lower-right of the first (top-right edge of map).');
-      calibStage = 0; calibBtn.textContent = 'Calibrate (2 clicks)'; calibBtn.style.background=''; calibBtn.style.color='';
+  if (calibStage >= 1 && calibStage <= CALIB_NEEDED) {
+    calibClicks.push({ x: px, y: py });
+    if (calibStage < CALIB_NEEDED) {
+      calibStage++;
+      calibBtn.textContent = calibPromptText();
       return;
     }
-    offX = x1; offY = y1;
+    // All 9 clicks collected. Each click i has known integer (dr_i, dc_i) in
+    // the 3×3 lattice with spacing K. Iso projection:
+    //   x_i = offX + (c_i − r_i) · halfW
+    //   y_i = offY + (c_i + r_i) · halfH
+    // Anchor (dr=0,dc=0) at AUTO_ANCHOR so all 9 inferred tiles land inside
+    // the AUTO_GRID_N×AUTO_GRID_N grid. The two axes decouple — closed-form
+    // LS for (offX, halfW) from x; (offY, halfH) from y.
+    const RATIO = POLYTOPIA_WH_RATIO;
+    const K = calibSpacing;
+    const positions = calibTilePositions(K);
+    const r0 = AUTO_ANCHOR;   // dr ∈ [0, 2K] → row range [30, 30+2K], in bounds for K≤15
+    const c0 = AUTO_ANCHOR;
+    const pts = calibClicks.map((click, i) => ({
+      x: click.x, y: click.y,
+      r: r0 + positions[i].dr,
+      c: c0 + positions[i].dc
+    }));
+    let su=0, sv=0, sx=0, sy=0, suu=0, svv=0, sux=0, svy=0;
+    for (const t of pts) {
+      const u = t.c - t.r, v = t.c + t.r;
+      su += u; sv += v; sx += t.x; sy += t.y;
+      suu += u*u; svv += v*v;
+      sux += u * t.x; svy += v * t.y;
+    }
+    const n = pts.length;
+    const denomU = n * suu - su * su;
+    const denomV = n * svv - sv * sv;
+    if (denomU === 0 || denomV === 0) {
+      flashStatus('Calibration failed — degenerate click layout.');
+      calibStage = 0; calibClicks = []; resetCalibBtn();
+      return;
+    }
+    const halfW_new = (n * sux - su * sx) / denomU;
+    const halfH_new = (n * svy - sv * sy) / denomV;
+    const tileW_new = halfW_new * 2;
+    const tileH_new = halfH_new * 2;
+
+    if (tileW_new < 8 || tileH_new < 4) {
+      flashStatus('Calibration failed — inferred tile size too small. Did you click in the right order?');
+      calibStage = 0; calibClicks = []; resetCalibBtn();
+      return;
+    }
+    if (Math.abs(tileW_new / tileH_new - RATIO) > 0.5) {
+      flashStatus('Calibration warning — tile aspect ratio looks off. Click order or spacing may be wrong.');
+    }
+
+    // Lock the W:H ratio. Average the W estimate and (RATIO·H) estimate to
+    // halve click jitter on the smaller, noisier H axis.
+    tileW = (tileW_new + RATIO * tileH_new) / 2;
+    tileH = tileW / RATIO;
+    offX = (sx - halfW_new * su) / n;
+    offY = (sy - halfH_new * sv) / n;
+
+    // Compute residuals so the user can sanity-check click accuracy.
+    let resSq = 0;
+    for (const t of pts) {
+      const u = t.c - t.r, v = t.c + t.r;
+      const px_ = offX + u * (tileW/2);
+      const py_ = offY + v * (tileH/2);
+      resSq += (t.x - px_)**2 + (t.y - py_)**2;
+    }
+    const rms = Math.sqrt(resSq / n);
+    console.log('[calib] 9-click LS fit:', { tileW, tileH, offX, offY, rmsPx: rms.toFixed(2), K });
+
+    if (grid.rows !== AUTO_GRID_N || grid.cols !== AUTO_GRID_N) {
+      grid = P.makeGrid(AUTO_GRID_N, AUTO_GRID_N);
+      document.getElementById('rows').value = AUTO_GRID_N;
+      document.getElementById('cols').value = AUTO_GRID_N;
+    }
     document.getElementById('tileW').value = Math.round(tileW);
     document.getElementById('tileH').value = Math.round(tileH);
     document.getElementById('offX').value = Math.round(offX);
     document.getElementById('offY').value = Math.round(offY);
     document.getElementById('offXv').textContent = Math.round(offX);
     document.getElementById('offYv').textContent = Math.round(offY);
-    calibStage = 0;
-    calibBtn.textContent = 'Calibrate (2 clicks)';
-    calibBtn.style.background=''; calibBtn.style.color='';
+    calibStage = 0; calibClicks = [];
+    resetCalibBtn();
+    gridReady = true;
+    flashStatus(`Aligned (RMS ${rms.toFixed(1)}px).`);
     draw();
     return;
   }
 
+  if (!gridReady) return;
   const { r, c } = screenToTile(px, py);
   if (r<0||c<0||r>=grid.rows||c>=grid.cols) return;
   const t = grid.tiles[r][c];
@@ -1064,9 +1208,12 @@ document.getElementById('clearImg').onclick = () => {
 };
 
 function readNum(id) { return parseInt(document.getElementById(id).value, 10); }
-document.getElementById('applyGrid').onclick = () => {
+function applyGridFromInputs() {
   const r = readNum('rows'), c = readNum('cols');
-  tileW = readNum('tileW'); tileH = readNum('tileH');
+  // Lock W:H to Polytopia's fixed projection — derive H from W.
+  tileW = readNum('tileW');
+  tileH = tileW / POLYTOPIA_WH_RATIO;
+  document.getElementById('tileH').value = Math.round(tileH);
   offX = readNum('offX');  offY = readNum('offY');
   const ng = P.makeGrid(r, c);
   for (let rr=0; rr<Math.min(r, grid.rows); rr++)
@@ -1075,6 +1222,17 @@ document.getElementById('applyGrid').onclick = () => {
       ng.tiles[rr][cc].building = grid.tiles[rr][cc].building;
     }
   grid = ng;
+  draw();
+}
+document.getElementById('addEmptyGrid').onclick = () => {
+  gridReady = true;
+  applyGridFromInputs();
+};
+document.getElementById('removeGrid').onclick = () => {
+  gridReady = false;
+  // Wipe paint so the next "Add grid" / Auto-align starts clean.
+  grid = P.makeGrid(AUTO_GRID_N, AUTO_GRID_N);
+  selectedCity = null;
   draw();
 };
 ['offX','offY'].forEach(id => {
@@ -1087,7 +1245,11 @@ document.getElementById('applyGrid').onclick = () => {
 });
 ['tileW','tileH','rows','cols'].forEach(id => {
   document.getElementById(id).addEventListener('change', () => {
-    document.getElementById('applyGrid').click();
+    // Keep ratio lock: editing Tile H mirrors into Tile W before apply.
+    if (id === 'tileH') {
+      document.getElementById('tileW').value = Math.round(readNum('tileH') * POLYTOPIA_WH_RATIO);
+    }
+    if (gridReady) applyGridFromInputs();
   });
 });
 
