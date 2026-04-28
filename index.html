@@ -53,6 +53,7 @@
   <label for="file" class="action" style="cursor:pointer; background:#7ed957">📷 Choose screenshot</label>
   <span id="fileName" class="legend" style="max-width:160px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap"></span>
   <button class="secondary" id="clearImg">No screenshot</button>
+  <button class="secondary" id="loadExample" title="Load a saved screenshot + grid + optimized board so you can see what the result looks like.">Load example</button>
   <div class="stat">Stars/turn: <b id="stars">0</b></div>
   <div class="stat">Cities: <b id="cityCount" style="color:var(--warn)">0</b></div>
   <div id="statusMsg" class="stat" style="display:none; background:#3a1e1e; color:var(--warn); border:1px solid var(--warn)"></div>
@@ -1557,6 +1558,48 @@ document.getElementById('clearImg').onclick = () => {
   document.getElementById('file').value = '';
   document.getElementById('fileName').textContent = '';
   resizeStage(); draw();
+};
+
+// ---- Bundled example: a saved screenshot + grid calibration + painted tiles
+// + optimized placements, so a new visitor can see what a finished board looks
+// like without painting one from scratch. Captured from a real Polytopia
+// session with Spiritualism + Construction enabled.
+const EXAMPLE_BOARD = {"rows":60,"cols":60,"cal":{"tileW":107.91251647306086,"tileH":64.34854888077571,"offX":1140.890448710474,"offY":-1384.4614994633603,"viewZoom":0.7513148009015777},"techs":{"windmill":true,"forge":true,"sawmill":true,"chop":true,"spiritualism":true,"construction":true},"tiles":[{"r":29,"c":32,"type":"forest","mc":"31,34"},{"r":29,"c":33,"mc":"31,34"},{"r":29,"c":34,"type":"forest","mc":"31,34"},{"r":29,"c":35,"mc":"31,34"},{"r":30,"c":28,"mc":"32,30"},{"r":30,"c":29,"type":"forest","mc":"32,30"},{"r":30,"c":30,"type":"mountain","mc":"32,30"},{"r":30,"c":31,"mc":"32,30"},{"r":30,"c":32,"type":"crop","b":"farm","mc":"32,30"},{"r":30,"c":33,"type":"crop","b":"farm","mc":"31,34"},{"r":30,"c":34,"type":"crop","b":"farm","mc":"31,34"},{"r":30,"c":35,"type":"forest","mc":"31,34"},{"r":31,"c":28,"mc":"32,30"},{"r":31,"c":29,"type":"forest","mc":"32,30"},{"r":31,"c":30,"type":"forest","mc":"32,30"},{"r":31,"c":31,"type":"forest","b":"farm","bu":1,"mc":"32,30"},{"r":31,"c":32,"b":"market","mc":"32,30"},{"r":31,"c":33,"b":"windmill","mc":"31,34"},{"r":31,"c":34,"type":"city"},{"r":31,"c":35,"type":"forest","b":"lumberhut","mc":"31,34"},{"r":32,"c":28,"type":"forest","mc":"32,30"},{"r":32,"c":29,"type":"crop","mc":"32,30"},{"r":32,"c":30,"type":"city"},{"r":32,"c":31,"type":"crop","b":"farm","mc":"32,30"},{"r":32,"c":32,"b":"windmill","mc":"32,30"},{"r":32,"c":33,"b":"farm","gr":1,"bu":1,"mc":"31,34"},{"r":32,"c":34,"type":"forest","b":"market","chop":1,"mc":"31,34"},{"r":32,"c":35,"b":"sawmill","mc":"31,34"},{"r":33,"c":28,"type":"blocked","mc":"32,30"},{"r":33,"c":29,"mc":"32,30"},{"r":33,"c":30,"type":"forest","mc":"32,30"},{"r":33,"c":31,"type":"forest","b":"farm","bu":1,"mc":"32,30"},{"r":33,"c":32,"b":"market","mc":"34,33"},{"r":33,"c":33,"type":"forest","b":"sawmill","chop":1,"mc":"34,33"},{"r":33,"c":34,"type":"forest","b":"lumberhut","mc":"34,33"},{"r":33,"c":35,"type":"forest","b":"lumberhut","mc":"34,33"},{"r":34,"c":28,"type":"crop","mc":"32,30"},{"r":34,"c":29,"type":"forest","mc":"32,30"},{"r":34,"c":30,"mc":"32,30"},{"r":34,"c":31,"b":"windmill","mc":"34,33"},{"r":34,"c":32,"type":"forest","b":"lumberhut","mc":"34,33"},{"r":34,"c":33,"type":"city"},{"r":34,"c":34,"b":"lumberhut","gr":1,"mc":"34,33"},{"r":34,"c":35,"type":"mountain","mc":"34,33"},{"r":35,"c":31,"type":"forest","mc":"34,33"},{"r":35,"c":32,"mc":"34,33"},{"r":35,"c":33,"type":"forest","mc":"34,33"},{"r":35,"c":34,"mc":"34,33"},{"r":35,"c":35,"type":"mountain","mc":"34,33"},{"r":36,"c":31,"mc":"34,33"},{"r":36,"c":32,"type":"blocked","mc":"34,33"},{"r":36,"c":33,"mc":"34,33"},{"r":36,"c":34,"type":"forest","mc":"34,33"},{"r":36,"c":35,"mc":"34,33"}]};
+
+document.getElementById('loadExample').onclick = () => {
+  const ex = EXAMPLE_BOARD;
+  // Reset to a fresh grid sized to the saved example.
+  grid = P.makeGrid(ex.rows, ex.cols);
+  selectedCity = null;
+  for (const tt of ex.tiles) {
+    const t = grid.tiles[tt.r][tt.c];
+    if (tt.type) t.type = tt.type;
+    if (tt.b) t.building = tt.b;
+    if (tt.chop) t.chopped = true;
+    if (tt.gr) t.grown = true;
+    if (tt.bu) t.burned = true;
+    if (tt.mc) t.manualCity = tt.mc;
+  }
+  // Restore calibration so the grid lines up with the saved screenshot.
+  tileW = ex.cal.tileW; tileH = ex.cal.tileH;
+  offX = ex.cal.offX;   offY = ex.cal.offY;
+  viewZoom = ex.cal.viewZoom;
+  gridReady = true;
+  // Restore the optimizer config the example was built with, and sync the
+  // checkboxes so the user can see which techs were enabled.
+  Object.assign(optConfig, ex.techs);
+  for (const cb of document.querySelectorAll('input.enable')) {
+    if (cb.dataset.enable in optConfig) cb.checked = !!optConfig[cb.dataset.enable];
+  }
+  // Load the bundled screenshot.
+  bgImg.onload = () => { resizeStage(); updateSelectedCityLabel(); draw(); };
+  bgImg.onerror = () => {
+    flashStatus('Example screenshot (example-board.png) not found.');
+    resizeStage(); updateSelectedCityLabel(); draw();
+  };
+  bgImg.src = 'example-board.png?' + Date.now(); // bust cache
+  document.getElementById('fileName').textContent = 'example-board.png';
+  document.getElementById('file').value = '';
 };
 
 function readNum(id) { return parseInt(document.getElementById(id).value, 10); }

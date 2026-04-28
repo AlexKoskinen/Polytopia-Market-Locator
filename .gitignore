@@ -2,3 +2,5 @@
 .claude/
 *.zip
 *.png
+# Bundled example screenshot used by the in-app "Load example" button.
+!example-board.png
