@@ -153,12 +153,17 @@
       <label><input type="checkbox" class="toggle" data-show="mine"      checked/> Mines</label>
       <label><input type="checkbox" class="toggle" data-show="lumberhut" checked/> Lumber huts</label>
       <label><input type="checkbox" class="toggle" data-show="chopped"   checked/> Chopped forests</label>
+      <label><input type="checkbox" class="toggle" data-show="grown"     checked/> Grown forests</label>
+      <label><input type="checkbox" class="toggle" data-show="burned"    checked/> Burned forests</label>
       <label><input type="checkbox" class="toggle" data-show="territory" checked/> City territory</label>
     </div>
     <div class="legend" style="margin-top:6px">
       <span style="color:#ffcf4d">●</span> Market ·
       <span style="color:#7ed957">●</span> Supplier (W/F/S) ·
       <span style="color:#b58cff">●</span> Resource<br/>
+      <span style="color:#ff6b6b">✕</span> Chop ·
+      <span style="color:#7ed957">▲</span> Grow ·
+      <span style="color:#ff9a3c">◆</span> Burn (icons stack in tile corners)<br/>
       Badge on Markets = stars/turn; on suppliers = level.<br/>
       <b>One market per city.</b> Paint City tiles to mark city centers;
       territory is assigned to the nearest city.
@@ -705,7 +710,7 @@ const PALETTE = [
 // Display toggles
 const showFlags = { market:true, windmill:true, forge:true, sawmill:true,
                     farm:true, mine:true, lumberhut:true,
-                    chopped:true, territory:true };
+                    chopped:true, grown:true, burned:true, territory:true };
 function wireToggles(){
   document.querySelectorAll('.toggle').forEach(cb => {
     cb.addEventListener('change', () => { showFlags[cb.dataset.show] = cb.checked; draw(); });
@@ -883,48 +888,6 @@ function draw() {
       }
 
 
-      // Transformation indicators (chop / grow / burn). Single label so the user
-      // can see at a glance which optimizer transformations apply to the tile.
-      if (showFlags.chopped) {
-        const sz = Math.min(tileW, tileH) * 0.22;
-        if (t.chopped && t.type === 'forest' && !t.burned) {
-          // Forest that the optimizer wants chopped to a field.
-          lctx.strokeStyle = '#ff6b6b';
-          lctx.lineWidth = 2;
-          lctx.beginPath();
-          lctx.moveTo(cx - sz, cy - sz); lctx.lineTo(cx + sz, cy + sz);
-          lctx.moveTo(cx + sz, cy - sz); lctx.lineTo(cx - sz, cy + sz);
-          lctx.stroke();
-        }
-        if (t.grown && t.type === 'field') {
-          // Field the optimizer wants grown into a forest (Spiritualism).
-          // Small green up-triangle.
-          lctx.fillStyle = '#7ed957';
-          lctx.strokeStyle = '#0a3';
-          lctx.lineWidth = 1;
-          lctx.beginPath();
-          lctx.moveTo(cx, cy - sz);
-          lctx.lineTo(cx + sz*0.85, cy + sz*0.5);
-          lctx.lineTo(cx - sz*0.85, cy + sz*0.5);
-          lctx.closePath();
-          lctx.fill(); lctx.stroke();
-        }
-        if (t.burned) {
-          // Forest the optimizer wants burned to a crop (Construction).
-          // Small orange flame-like diamond.
-          lctx.fillStyle = '#ff9a3c';
-          lctx.strokeStyle = '#a04500';
-          lctx.lineWidth = 1;
-          lctx.beginPath();
-          lctx.moveTo(cx, cy - sz);
-          lctx.lineTo(cx + sz*0.7, cy);
-          lctx.lineTo(cx, cy + sz);
-          lctx.lineTo(cx - sz*0.7, cy);
-          lctx.closePath();
-          lctx.fill(); lctx.stroke();
-        }
-      }
-
       // Out-of-territory tiles: heavy darken + diagonal hatch so it's
       // unmistakable which tiles cannot host buildings.
       if (!t.cityId && t.type !== P.TILE.CITY && t.type !== P.TILE.FOG) {
@@ -988,6 +951,66 @@ function draw() {
           lctx.fillStyle = '#7ed957';
           lctx.textAlign = 'center'; lctx.textBaseline = 'middle';
           lctx.fillText(label, px + pw/2, py + ph/2 + 1);
+        }
+      }
+
+      // Transformation indicators (chop / grow / burn). Each is independently
+      // toggleable. Drawn AFTER the building badge so they remain visible on a
+      // tile that also has a Farm/etc., but with offsets chosen so each icon
+      // stays inside the diamond border (|x|/halfW + |y|/halfH ≤ 1) — that way
+      // it's unambiguous which tile each marker belongs to.
+      {
+        // sz: icon half-extent in px. ox/oy: offset of icon center from tile
+        // center. Tuned so (ox+sz, oy+sz) sits inside the diamond and clears
+        // the building badge (radius ≈ 0.32·tileH at center).
+        const sz = Math.min(tileW, tileH) * 0.10;
+        const ox = tileW * 0.16, oy = tileH * 0.20;
+        const drawIconBg = (ax, ay) => {
+          // Dark disc behind each icon so it pops against the badge / terrain.
+          lctx.fillStyle = 'rgba(0,0,0,0.55)';
+          lctx.beginPath();
+          lctx.arc(ax, ay, sz * 1.25, 0, Math.PI * 2);
+          lctx.fill();
+        };
+        if (showFlags.chopped && t.chopped && t.type === 'forest') {
+          // Top-left: chop (red X).
+          const ax = cx - ox, ay = cy - oy;
+          drawIconBg(ax, ay);
+          lctx.strokeStyle = '#ff6b6b';
+          lctx.lineWidth = 2;
+          lctx.beginPath();
+          lctx.moveTo(ax - sz, ay - sz); lctx.lineTo(ax + sz, ay + sz);
+          lctx.moveTo(ax + sz, ay - sz); lctx.lineTo(ax - sz, ay + sz);
+          lctx.stroke();
+        }
+        if (showFlags.grown && t.grown && t.type === 'field') {
+          // Top-right: grow (green up-triangle).
+          const ax = cx + ox, ay = cy - oy;
+          drawIconBg(ax, ay);
+          lctx.fillStyle = '#7ed957';
+          lctx.strokeStyle = '#0a3';
+          lctx.lineWidth = 1;
+          lctx.beginPath();
+          lctx.moveTo(ax, ay - sz);
+          lctx.lineTo(ax + sz * 0.85, ay + sz * 0.5);
+          lctx.lineTo(ax - sz * 0.85, ay + sz * 0.5);
+          lctx.closePath();
+          lctx.fill(); lctx.stroke();
+        }
+        if (showFlags.burned && t.burned) {
+          // Bottom-right: burn (orange flame-diamond).
+          const ax = cx + ox, ay = cy + oy;
+          drawIconBg(ax, ay);
+          lctx.fillStyle = '#ff9a3c';
+          lctx.strokeStyle = '#a04500';
+          lctx.lineWidth = 1;
+          lctx.beginPath();
+          lctx.moveTo(ax, ay - sz);
+          lctx.lineTo(ax + sz * 0.7, ay);
+          lctx.lineTo(ax, ay + sz);
+          lctx.lineTo(ax - sz * 0.7, ay);
+          lctx.closePath();
+          lctx.fill(); lctx.stroke();
         }
       }
     }
@@ -1243,6 +1266,16 @@ function zoomAt(factor, clientX, clientY) {
 }
 document.getElementById('zoomIn').onclick  = () => { const c = stageWrap.getBoundingClientRect(); zoomAt(1.25, c.left+c.width/2, c.top+c.height/2); };
 document.getElementById('zoomOut').onclick = () => { const c = stageWrap.getBoundingClientRect(); zoomAt(1/1.25, c.left+c.width/2, c.top+c.height/2); };
+// Scroll the stage wrapper so a given grid tile lands at the viewport center.
+// Uses the current viewZoom + iso projection — caller is responsible for having
+// set viewZoom/offX/offY/tileW/tileH first.
+function centerViewOnTile(r, c) {
+  applyZoom();
+  const { x, y } = tileCenter(r, c);
+  const wrapRect = stageWrap.getBoundingClientRect();
+  stageWrap.scrollLeft = Math.max(0, x * viewZoom - wrapRect.width  / 2);
+  stageWrap.scrollTop  = Math.max(0, y * viewZoom - wrapRect.height / 2);
+}
 document.getElementById('zoomReset').onclick = () => {
   const wrapRect = stageWrap.getBoundingClientRect();
   const sw = parseInt(stage.style.width), sh = parseInt(stage.style.height);
@@ -1564,7 +1597,7 @@ document.getElementById('clearImg').onclick = () => {
 // + optimized placements, so a new visitor can see what a finished board looks
 // like without painting one from scratch. Captured from a real Polytopia
 // session with Spiritualism + Construction enabled.
-const EXAMPLE_BOARD = {"rows":60,"cols":60,"cal":{"tileW":107.91251647306086,"tileH":64.34854888077571,"offX":1140.890448710474,"offY":-1384.4614994633603,"viewZoom":0.7513148009015777},"techs":{"windmill":true,"forge":true,"sawmill":true,"chop":true,"spiritualism":true,"construction":true},"tiles":[{"r":29,"c":32,"type":"forest","mc":"31,34"},{"r":29,"c":33,"mc":"31,34"},{"r":29,"c":34,"type":"forest","mc":"31,34"},{"r":29,"c":35,"mc":"31,34"},{"r":30,"c":28,"mc":"32,30"},{"r":30,"c":29,"type":"forest","mc":"32,30"},{"r":30,"c":30,"type":"mountain","mc":"32,30"},{"r":30,"c":31,"mc":"32,30"},{"r":30,"c":32,"type":"crop","b":"farm","mc":"32,30"},{"r":30,"c":33,"type":"crop","b":"farm","mc":"31,34"},{"r":30,"c":34,"type":"crop","b":"farm","mc":"31,34"},{"r":30,"c":35,"type":"forest","mc":"31,34"},{"r":31,"c":28,"mc":"32,30"},{"r":31,"c":29,"type":"forest","mc":"32,30"},{"r":31,"c":30,"type":"forest","mc":"32,30"},{"r":31,"c":31,"type":"forest","b":"farm","bu":1,"mc":"32,30"},{"r":31,"c":32,"b":"market","mc":"32,30"},{"r":31,"c":33,"b":"windmill","mc":"31,34"},{"r":31,"c":34,"type":"city"},{"r":31,"c":35,"type":"forest","b":"lumberhut","mc":"31,34"},{"r":32,"c":28,"type":"forest","mc":"32,30"},{"r":32,"c":29,"type":"crop","mc":"32,30"},{"r":32,"c":30,"type":"city"},{"r":32,"c":31,"type":"crop","b":"farm","mc":"32,30"},{"r":32,"c":32,"b":"windmill","mc":"32,30"},{"r":32,"c":33,"b":"farm","gr":1,"bu":1,"mc":"31,34"},{"r":32,"c":34,"type":"forest","b":"market","chop":1,"mc":"31,34"},{"r":32,"c":35,"b":"sawmill","mc":"31,34"},{"r":33,"c":28,"type":"blocked","mc":"32,30"},{"r":33,"c":29,"mc":"32,30"},{"r":33,"c":30,"type":"forest","mc":"32,30"},{"r":33,"c":31,"type":"forest","b":"farm","bu":1,"mc":"32,30"},{"r":33,"c":32,"b":"market","mc":"34,33"},{"r":33,"c":33,"type":"forest","b":"sawmill","chop":1,"mc":"34,33"},{"r":33,"c":34,"type":"forest","b":"lumberhut","mc":"34,33"},{"r":33,"c":35,"type":"forest","b":"lumberhut","mc":"34,33"},{"r":34,"c":28,"type":"crop","mc":"32,30"},{"r":34,"c":29,"type":"forest","mc":"32,30"},{"r":34,"c":30,"mc":"32,30"},{"r":34,"c":31,"b":"windmill","mc":"34,33"},{"r":34,"c":32,"type":"forest","b":"lumberhut","mc":"34,33"},{"r":34,"c":33,"type":"city"},{"r":34,"c":34,"b":"lumberhut","gr":1,"mc":"34,33"},{"r":34,"c":35,"type":"mountain","mc":"34,33"},{"r":35,"c":31,"type":"forest","mc":"34,33"},{"r":35,"c":32,"mc":"34,33"},{"r":35,"c":33,"type":"forest","mc":"34,33"},{"r":35,"c":34,"mc":"34,33"},{"r":35,"c":35,"type":"mountain","mc":"34,33"},{"r":36,"c":31,"mc":"34,33"},{"r":36,"c":32,"type":"blocked","mc":"34,33"},{"r":36,"c":33,"mc":"34,33"},{"r":36,"c":34,"type":"forest","mc":"34,33"},{"r":36,"c":35,"mc":"34,33"}]};
+const EXAMPLE_BOARD = {"rows":60,"cols":60,"cal":{"tileW":107.91251647306086,"tileH":64.34854888077571,"offX":1140.890448710474,"offY":-1384.4614994633603,"viewZoom":0.7513148009015777},"techs":{"windmill":true,"forge":true,"sawmill":true,"chop":true,"spiritualism":true,"construction":true},"centerOn":[32,30],"tiles":[{"r":29,"c":32,"type":"forest","mc":"31,34"},{"r":29,"c":33,"mc":"31,34"},{"r":29,"c":34,"type":"forest","mc":"31,34"},{"r":29,"c":35,"mc":"31,34"},{"r":30,"c":28,"mc":"32,30"},{"r":30,"c":29,"type":"forest","mc":"32,30"},{"r":30,"c":30,"type":"mountain","mc":"32,30"},{"r":30,"c":31,"mc":"32,30"},{"r":30,"c":32,"type":"crop","b":"farm","mc":"32,30"},{"r":30,"c":33,"type":"crop","b":"farm","mc":"31,34"},{"r":30,"c":34,"type":"crop","b":"farm","mc":"31,34"},{"r":30,"c":35,"type":"forest","mc":"31,34"},{"r":31,"c":28,"mc":"32,30"},{"r":31,"c":29,"type":"forest","mc":"32,30"},{"r":31,"c":30,"type":"forest","mc":"32,30"},{"r":31,"c":31,"type":"forest","b":"farm","bu":1,"mc":"32,30"},{"r":31,"c":32,"b":"market","mc":"32,30"},{"r":31,"c":33,"b":"windmill","mc":"31,34"},{"r":31,"c":34,"type":"city"},{"r":31,"c":35,"type":"forest","b":"lumberhut","mc":"31,34"},{"r":32,"c":28,"type":"forest","mc":"32,30"},{"r":32,"c":29,"type":"crop","mc":"32,30"},{"r":32,"c":30,"type":"city"},{"r":32,"c":31,"type":"crop","b":"farm","mc":"32,30"},{"r":32,"c":32,"b":"windmill","mc":"32,30"},{"r":32,"c":33,"b":"farm","gr":1,"bu":1,"mc":"31,34"},{"r":32,"c":34,"type":"forest","b":"market","chop":1,"mc":"31,34"},{"r":32,"c":35,"b":"sawmill","mc":"31,34"},{"r":33,"c":28,"type":"blocked","mc":"32,30"},{"r":33,"c":29,"mc":"32,30"},{"r":33,"c":30,"type":"forest","mc":"32,30"},{"r":33,"c":31,"type":"forest","b":"farm","bu":1,"mc":"32,30"},{"r":33,"c":32,"b":"market","mc":"34,33"},{"r":33,"c":33,"type":"forest","b":"sawmill","chop":1,"mc":"34,33"},{"r":33,"c":34,"type":"forest","b":"lumberhut","mc":"34,33"},{"r":33,"c":35,"type":"forest","b":"lumberhut","mc":"34,33"},{"r":34,"c":28,"type":"crop","mc":"32,30"},{"r":34,"c":29,"type":"forest","mc":"32,30"},{"r":34,"c":30,"mc":"32,30"},{"r":34,"c":31,"b":"windmill","mc":"34,33"},{"r":34,"c":32,"type":"forest","b":"lumberhut","mc":"34,33"},{"r":34,"c":33,"type":"city"},{"r":34,"c":34,"b":"lumberhut","gr":1,"mc":"34,33"},{"r":34,"c":35,"type":"mountain","mc":"34,33"},{"r":35,"c":31,"type":"forest","mc":"34,33"},{"r":35,"c":32,"mc":"34,33"},{"r":35,"c":33,"type":"forest","mc":"34,33"},{"r":35,"c":34,"mc":"34,33"},{"r":35,"c":35,"type":"mountain","mc":"34,33"},{"r":36,"c":31,"mc":"34,33"},{"r":36,"c":32,"type":"blocked","mc":"34,33"},{"r":36,"c":33,"mc":"34,33"},{"r":36,"c":34,"type":"forest","mc":"34,33"},{"r":36,"c":35,"mc":"34,33"}]};
 
 document.getElementById('loadExample').onclick = () => {
   const ex = EXAMPLE_BOARD;
@@ -1592,10 +1625,18 @@ document.getElementById('loadExample').onclick = () => {
     if (cb.dataset.enable in optConfig) cb.checked = !!optConfig[cb.dataset.enable];
   }
   // Load the bundled screenshot.
-  bgImg.onload = () => { resizeStage(); updateSelectedCityLabel(); draw(); };
+  const finishLoad = () => {
+    resizeStage();
+    updateSelectedCityLabel();
+    draw();
+    // Center on the example's flagship city (Telo) so the user lands on the
+    // interesting part of the board instead of an empty corner.
+    if (ex.centerOn) centerViewOnTile(ex.centerOn[0], ex.centerOn[1]);
+  };
+  bgImg.onload = finishLoad;
   bgImg.onerror = () => {
     flashStatus('Example screenshot (example-board.png) not found.');
-    resizeStage(); updateSelectedCityLabel(); draw();
+    finishLoad();
   };
   bgImg.src = 'example-board.png?' + Date.now(); // bust cache
   document.getElementById('fileName').textContent = 'example-board.png';
