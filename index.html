@@ -44,11 +44,38 @@
   @keyframes spin { to { transform: rotate(360deg); } }
   .spinbox .txt { font-size:14px; }
   .spinbox .sub { font-size:11px; color:var(--muted); margin-top:2px; }
+  .guide { position:relative; }
+  .guide > summary { list-style:none; padding:8px 10px; background:#5a8dff; color:#fff; border-radius:6px; cursor:pointer; font-weight:600; font-size:13px; user-select:none; }
+  .guide > summary::-webkit-details-marker { display:none; }
+  .guide > summary::before { content:"📖 "; }
+  .guide[open] > summary { background:#3d6ed8; }
+  .guide-panel { position:absolute; top:calc(100% + 6px); left:0; z-index:500; background:var(--panel); border:1px solid #444; border-radius:8px; padding:14px 16px; width:380px; box-shadow:0 8px 24px #000a; font-size:13px; line-height:1.55; }
+  .guide-panel ol { margin:0; padding-left:22px; }
+  .guide-panel li { margin-bottom:6px; }
+  .guide-panel li b { color:var(--accent); }
+  .guide-panel .tip { font-size:11px; color:var(--muted); margin-top:8px; padding-top:8px; border-top:1px solid #3a3d48; }
 </style>
 </head>
 <body>
 <header>
   <h1>Polytopia Market Locator</h1>
+  <details class="guide" id="guide">
+    <summary>Step-by-step guide</summary>
+    <div class="guide-panel">
+      <ol>
+        <li><b>Choose screenshot</b> of your map.</li>
+        <li>Click <b>Auto-align grid</b> and follow the 9-click prompt.</li>
+        <li>Click <b>Set anchor 1</b>, make sure <b>Lock grid</b> is unchecked, then drag anchor 1 onto a screenshot tile <i>vertex</i> (corner).</li>
+        <li>Click <b>Set anchor 2</b> — the farther from anchor 1 the better (e.g. opposite side of the map).</li>
+        <li>Drag anchor 2 onto its nearest screenshot tile vertex. The grid scales to match.</li>
+        <li><b>Paint tiles</b> using the palette so terrain matches the screenshot (Cities, Forests, Crops, Mountains, etc.).</li>
+        <li>Switch the tool to <b>Assign territory</b>: click a city, then click its tiles.</li>
+        <li>Under <b>Optimizer: allow building</b>, tick which buildings/techs are available.</li>
+        <li>Click <b>Find optimal markets</b> — the best market layout appears on the map.</li>
+      </ol>
+      <div class="tip">Tip: lock the grid once anchors are set so you don't nudge it while painting.</div>
+    </div>
+  </details>
   <input type="file" id="file" accept="image/*" style="display:none" />
   <label for="file" class="action" style="cursor:pointer; background:#7ed957">📷 Choose screenshot</label>
   <span id="fileName" class="legend" style="max-width:160px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap"></span>
