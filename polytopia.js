@@ -1,4 +1,5 @@
 // Polytopia rules engine + market optimizer (current rules).
+// Created by Alex Koskinen. Tracks Polytopia v2.16.5.15700 "Moonrise" (Mar 2026).
 // Adjacency is 8-directional (king moves). Map is a square grid.
 //
 // Current rules captured here:
@@ -16,7 +17,10 @@
 
 const TILE = {
   FIELD:'field', FOREST:'forest', MOUNTAIN:'mountain',
-  CROP:'crop', ORE:'ore', WATER:'water', CITY:'city', BLOCKED:'blocked', FOG:'fog'
+  CROP:'crop', ORE:'ore', WATER:'water', CITY:'city', BLOCKED:'blocked',
+  // OTHER = a non-modeled existing building (Temple/Monument/etc.). Becomes a
+  // Field for build purposes when removed by Destroy (Chivalry tech).
+  OTHER:'other', FOG:'fog'
 };
 const BUILD = {
   NONE:null, FARM:'farm', MINE:'mine', LUMBERHUT:'lumberhut', PORT:'port',

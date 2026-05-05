@@ -1,4 +1,9 @@
 <!DOCTYPE html>
+<!--
+  Polytopia Market Locator
+  Created by Alex Koskinen.
+  Rules track the official Polytopia game (v2.16.5.15700 "Moonrise", March 2026).
+-->
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
@@ -59,6 +64,7 @@
 <body>
 <header>
   <h1>Polytopia Market Locator</h1>
+  <span class="legend" id="gameVersion" title="Polytopia game version these rules target" style="font-size:11px; color:var(--muted); border:1px solid #444; padding:2px 6px; border-radius:4px">v2.16.5 "Moonrise"</span>
   <details class="guide" id="guide">
     <summary>Step-by-step guide</summary>
     <div class="guide-panel">
@@ -180,6 +186,8 @@
         <input type="checkbox" class="enable" data-enable="spiritualism"/> Spiritualism (grow forest)</label>
       <label title="Burn Forest: turn an empty Forest tile in city territory into Crop (then place a Farm on it). Combine with Spiritualism to chain Field → Forest → Crop.">
         <input type="checkbox" class="enable" data-enable="construction"/> Construction (burn forest)</label>
+      <label title="Destroy: remove an Other-Building tile (Temple, Monument, etc.) at no cost so the underlying Field can host a Market or supplier. Unlocked in-game by Chivalry.">
+        <input type="checkbox" class="enable" data-enable="destroy"/> Chivalry (destroy building)</label>
     </div>
 
     <h2>Show on map</h2>
@@ -194,6 +202,7 @@
       <label><input type="checkbox" class="toggle" data-show="chopped"   checked/> Chopped forests</label>
       <label><input type="checkbox" class="toggle" data-show="grown"     checked/> Grown forests</label>
       <label><input type="checkbox" class="toggle" data-show="burned"    checked/> Burned forests</label>
+      <label><input type="checkbox" class="toggle" data-show="destroyed" checked/> Destroyed buildings</label>
       <label><input type="checkbox" class="toggle" data-show="territory" checked/> City territory</label>
     </div>
     <div class="legend" style="margin-top:6px">
@@ -202,7 +211,8 @@
       <span style="color:#b58cff">●</span> Resource<br/>
       <span style="color:#ff6b6b">✕</span> Chop ·
       <span style="color:#7ed957">▲</span> Grow ·
-      <span style="color:#ff9a3c">◆</span> Burn (icons stack in tile corners)<br/>
+      <span style="color:#ff9a3c">◆</span> Burn ·
+      <span style="color:#c39bd3">✕</span> Destroy (icons stack in tile corners)<br/>
       Badge on Markets = stars/turn; on suppliers = level.<br/>
       <b>One market per city.</b> Paint City tiles to mark city centers;
       territory is assigned to the nearest city.
@@ -240,14 +250,22 @@
 <script>
 // ===== Inlined polytopia.js (rules + optimizer) =====
 const TILE = { FIELD:'field', FOREST:'forest', MOUNTAIN:'mountain',
-  CROP:'crop', ORE:'ore', WATER:'water', CITY:'city', BLOCKED:'blocked', FOG:'fog' };
+  CROP:'crop', ORE:'ore', WATER:'water', CITY:'city', BLOCKED:'blocked',
+  OTHER:'other', FOG:'fog' };
+// TILE.BLOCKED  — "Ruin" — non-building obstruction (cannot be cleared by Destroy).
+// TILE.OTHER    — "Other Building" — represents an existing building (e.g. Temple,
+//                 Monument) sitting on a Field-equivalent tile. With the Destroy
+//                 tech enabled (Chivalry), the optimizer may destroy it (free)
+//                 to reclaim the underlying Field for a Market/supplier.
 // Effective terrain: chopped forests behave as empty Fields for building rules.
 // Effective terrain after optimizer-applied transformations:
-//   chopped: forest tile (or grown-forest tile) reverts to field
-//   grown:   field tile becomes forest (Spiritualism / Grow Forest)
-//   burned:  forest (or grown forest) becomes crop (Construction / Burn Forest)
+//   chopped:   forest tile (or grown-forest tile) reverts to field
+//   grown:     field tile becomes forest (Spiritualism / Grow Forest)
+//   burned:    forest (or grown forest) becomes crop (Construction / Burn Forest)
+//   destroyed: other-building tile reverts to field (Chivalry / Destroy)
 // Burn always yields crop regardless of chop state.
 function effType(t) {
+  if (t.destroyed && t.type === TILE.OTHER) return TILE.FIELD;
   if (t.burned) return TILE.CROP;
   if (t.chopped && (t.type === TILE.FOREST || t.grown)) return TILE.FIELD;
   if (t.grown   && t.type === TILE.FIELD) return TILE.FOREST;
@@ -272,7 +290,7 @@ function makeGrid(rows,cols){
   const tiles=[];
   for(let r=0;r<rows;r++){
     const row=[];
-    for(let c=0;c<cols;c++) row.push({r,c,type:TILE.FIELD,building:null,chopped:false,grown:false,burned:false,cityId:0,manualCity:null});
+    for(let c=0;c<cols;c++) row.push({r,c,type:TILE.FIELD,building:null,chopped:false,grown:false,burned:false,destroyed:false,userPlaced:false,userBuilding:null,cityId:0,manualCity:null});
     tiles.push(row);
   }
   return {rows,cols,tiles};
@@ -310,6 +328,8 @@ function validateBoard(g){
     }
     if([BUILD.WINDMILL,BUILD.FORGE,BUILD.SAWMILL,BUILD.MARKET].includes(b) && effType(t)!==TILE.FIELD)
       errs.push(`${b} at ${r},${c} must be on empty Field`);
+    if(t.type===TILE.OTHER && b && !t.destroyed)
+      errs.push(`${b} at ${r},${c} sits on an Other Building tile that wasn't destroyed`);
   }
   for(const b of UNIQUE_PER_CITY){
     const c = countsPerCity(g,b);
@@ -329,7 +349,7 @@ function marketStars(g,r,c){
   for(const nb of neighbors(g,r,c)){
     const b=nb.building;
     if(b===BUILD.WINDMILL||b===BUILD.FORGE||b===BUILD.SAWMILL)
-      s += Math.min(supplierLevel(g,nb.r,nb.c,b),4);
+      s += Math.min(supplierLevel(g,nb.r,nb.c,b),8);
   }
   return Math.min(s, MARKET_MAX);
 }
@@ -366,7 +386,7 @@ function cloneGrid(g){
     const row=[];
     for(let c=0;c<g.cols;c++){
       const t=g.tiles[r][c];
-      row.push({r:t.r,c:t.c,type:t.type,building:t.building,chopped:!!t.chopped,grown:!!t.grown,burned:!!t.burned,cityId:t.cityId||0,manualCity:t.manualCity||null});
+      row.push({r:t.r,c:t.c,type:t.type,building:t.building,chopped:!!t.chopped,grown:!!t.grown,burned:!!t.burned,destroyed:!!t.destroyed,userPlaced:!!t.userPlaced,userBuilding:t.userBuilding||null,cityId:t.cityId||0,manualCity:t.manualCity||null});
     }
     ng.tiles.push(row);
   }
@@ -378,13 +398,25 @@ function cloneGrid(g){
 //                 in city territory can be grown.
 //   construction: Burn Forest (Forest → Crop, lets Farms go on the result).
 //   Both checked: Field → Forest → Crop chain → Farm.
+//   destroy:      Chivalry / Destroy. Removes an "Other Building" tile (free)
+//                 so the underlying Field can host a Market/supplier.
 const optConfig = { windmill:true, forge:true, sawmill:true, chop:true,
-                    spiritualism:false, construction:false };
+                    spiritualism:false, construction:false, destroy:false };
 
 // Moves the hill-climb may try at a given tile. Each move is a {chopped, grown,
 // burned, building} tuple; applyMove overwrites all four fields. movesFor uses
 // the tile's *original* type (t.type) to decide which transformations are legal.
 function movesFor(t){
+  // User-painted buildings are immutable by default — the optimizer respects
+  // them. In particular, a user-painted Lumber Hut on a forest cannot be
+  // chopped (per current Polytopia rules: Chop Forest acts on EMPTY forest
+  // tiles only; once a Lumber Hut is built, you can't chop the forest under it).
+  // With Chivalry/Destroy enabled, the optimizer is free to remove ANY user-
+  // placed building (Chivalry's Destroy works on any building or ruin), so
+  // the lock is lifted and the tile becomes fair game.
+  if (t.userPlaced && t.building && !optConfig.destroy) {
+    return [{chopped:!!t.chopped, grown:!!t.grown, burned:!!t.burned, destroyed:!!t.destroyed, building:t.building}];
+  }
   const suppliers = [];
   if (optConfig.windmill) suppliers.push(BUILD.WINDMILL);
   if (optConfig.forge)    suppliers.push(BUILD.FORGE);
@@ -393,13 +425,23 @@ function movesFor(t){
   const moves = [];
 
   // Helpers — each pushes a move with the right flags for the target effType.
-  const pushField  = b => moves.push({chopped:false, grown:false, burned:false, building:b});
-  const pushForest = b => moves.push({chopped:false, grown:false, burned:false, building:b});
-  const pushChop   = b => moves.push({chopped:true,  grown:false, burned:false, building:b});
-  const pushGrow   = b => moves.push({chopped:false, grown:true,  burned:false, building:b});
-  const pushBurn   = b => moves.push({chopped:false, grown:false, burned:true,  building:b}); // forest → crop
-  const pushGrowBurn = b => moves.push({chopped:false, grown:true, burned:true, building:b}); // field → forest → crop
+  const pushField  = b => moves.push({chopped:false, grown:false, burned:false, destroyed:false, building:b});
+  const pushForest = b => moves.push({chopped:false, grown:false, burned:false, destroyed:false, building:b});
+  const pushChop   = b => moves.push({chopped:true,  grown:false, burned:false, destroyed:false, building:b});
+  const pushGrow   = b => moves.push({chopped:false, grown:true,  burned:false, destroyed:false, building:b});
+  const pushBurn   = b => moves.push({chopped:false, grown:false, burned:true,  destroyed:false, building:b}); // forest → crop
+  const pushGrowBurn = b => moves.push({chopped:false, grown:true, burned:true,  destroyed:false, building:b}); // field → forest → crop
+  const pushDestroy  = b => moves.push({chopped:false, grown:false, burned:false, destroyed:true,  building:b}); // other → field
 
+  if (t.type === TILE.OTHER) {
+    // Tile is currently occupied by some non-modeled building (Temple, etc.).
+    // Without Destroy tech, nothing the optimizer cares about can go here.
+    // With Destroy tech, the building can be removed (free) and the underlying
+    // Field used for any field-eligible role.
+    moves.push({chopped:false, grown:false, burned:false, destroyed:false, building:null});
+    if (optConfig.destroy) for (const b of fieldRoles) pushDestroy(b);
+    return moves;
+  }
   if (t.type === TILE.FOREST) {
     // Native forest: lumberhut or forge in place.
     pushForest(BUILD.LUMBERHUT);
@@ -430,7 +472,7 @@ function movesFor(t){
     return moves;
   }
   // Other types (crop/ore/water/...) aren't in the optimizer's pool.
-  return [{chopped:false, grown:false, burned:false, building:t.building}];
+  return [{chopped:false, grown:false, burned:false, destroyed:false, building:t.building}];
 }
 
 // Assign a cityId to every tile. City-typed tiles get unique ids; every other
@@ -492,36 +534,43 @@ function objectiveScore(g){
   return totalStarsPerTurn(g) - 10000 * totalExcessPerCity(g);
 }
 function applyMove(t,m){
-  t.chopped = !!m.chopped;
-  t.grown   = !!m.grown;
-  t.burned  = !!m.burned;
-  t.building = m.building;
+  t.chopped   = !!m.chopped;
+  t.grown     = !!m.grown;
+  t.burned    = !!m.burned;
+  t.destroyed = !!m.destroyed;
+  t.building  = m.building;
 }
 function hillClimb(g){
   // Pool = every tile the optimizer might reassign.
   const pool=[];
   for(let r=0;r<g.rows;r++) for(let c=0;c<g.cols;c++){
     const t=g.tiles[r][c];
-    if((t.type===TILE.FIELD || t.type===TILE.FOREST) && t.cityId) pool.push(t);
+    if((t.type===TILE.FIELD || t.type===TILE.FOREST || t.type===TILE.OTHER) && t.cityId) pool.push(t);
   }
   let improved=true, best=objectiveScore(g), iter=0;
   while(improved && iter<400){
     improved=false; iter++;
-    // Total transformations on a move (chop/grow/burn). Used to tie-break in
-    // favor of leaving the user's painted terrain alone when stars are equal.
-    const xform = m => (m.chopped?1:0) + (m.grown?1:0) + (m.burned?1:0);
+    // Total transformations on a move (chop/grow/burn/destroy). Used to tie-break
+    // in favor of leaving the user's painted terrain alone when stars are equal.
+    const xform = m => (m.chopped?1:0) + (m.grown?1:0) + (m.burned?1:0) + (m.destroyed?1:0);
     for(const t of pool){
-      const orig = {chopped:!!t.chopped, grown:!!t.grown, burned:!!t.burned, building:t.building};
+      const orig = {chopped:!!t.chopped, grown:!!t.grown, burned:!!t.burned, destroyed:!!t.destroyed, building:t.building};
       let bestM = orig, bestScore = best;
       for(const m of movesFor(t)){
         applyMove(t,m);
         const s=objectiveScore(g);
         // Tie-break priority (high → low):
-        //   1. Fewer terrain transformations (don't chop/grow/burn unnecessarily).
-        //   2. Within the same transformation count, prefer no building over an idle one.
+        //   1. If the user painted a building here, prefer keeping it — only
+        //      destroy it when stars strictly improve. This stops the optimizer
+        //      from gratuitously demolishing user-placed Lumber Huts when
+        //      Chivalry is on but no replacement helps that particular tile.
+        //   2. Fewer terrain transformations (don't chop/grow/burn unnecessarily).
+        //   3. Within the same transformation count, prefer no building over an idle one.
         let tieBetter = false;
         if(s===bestScore){
-          if(xform(m) < xform(bestM)) tieBetter = true;
+          if (t.userBuilding) {
+            if (m.building === t.userBuilding && bestM.building !== t.userBuilding) tieBetter = true;
+          } else if(xform(m) < xform(bestM)) tieBetter = true;
           else if(xform(m) === xform(bestM) &&
                   m.building===BUILD.NONE && bestM.building!==BUILD.NONE) tieBetter = true;
         }
@@ -529,15 +578,17 @@ function hillClimb(g){
       }
       applyMove(t,bestM);
       if(bestM.building!==orig.building || bestM.chopped!==orig.chopped ||
-         bestM.grown!==orig.grown || bestM.burned!==orig.burned) improved=true;
+         bestM.grown!==orig.grown || bestM.burned!==orig.burned ||
+         bestM.destroyed!==orig.destroyed) improved=true;
       best=bestScore;
     }
     // Pair-swap pass: exchanges roles between two pool tiles if the swap
     // strictly improves the objective. Helps escape local optima where two
     // buildings block each other's ideal slots.
-    const snap = t => ({building:t.building, chopped:!!t.chopped, grown:!!t.grown, burned:!!t.burned});
+    const snap = t => ({building:t.building, chopped:!!t.chopped, grown:!!t.grown, burned:!!t.burned, destroyed:!!t.destroyed});
     const eq   = (m1,m2) => m1.building===m2.building && !!m1.chopped===!!m2.chopped &&
-                            !!m1.grown===!!m2.grown && !!m1.burned===!!m2.burned;
+                            !!m1.grown===!!m2.grown && !!m1.burned===!!m2.burned &&
+                            !!m1.destroyed===!!m2.destroyed;
     for(let i=0;i<pool.length;i++){
       for(let j=i+1;j<pool.length;j++){
         const a=pool[i], b=pool[j];
@@ -560,8 +611,13 @@ function optimize(gIn){
   // by a previous optimize run are wiped so we always re-plan from scratch.
   for(let r=0;r<g.rows;r++) for(let c=0;c<g.cols;c++){
     const t=g.tiles[r][c];
-    if(t.chopped || t.grown || t.burned){
-      t.chopped = t.grown = t.burned = false;
+    // User-painted buildings are sticky — never wiped. The user explicitly put
+    // them there and the optimizer plans around them. EXCEPTION: when Chivalry
+    // (destroy) is enabled, user-placed buildings are no longer locked — the
+    // optimizer is allowed to demolish them to make room for higher-value uses.
+    if(t.userPlaced && t.building && !optConfig.destroy) continue;
+    if(t.chopped || t.grown || t.burned || t.destroyed){
+      t.chopped = t.grown = t.burned = t.destroyed = false;
       t.building = null;
     }
     if([BUILD.WINDMILL,BUILD.FORGE,BUILD.SAWMILL,BUILD.MARKET].includes(t.building)) t.building=null;
@@ -576,14 +632,20 @@ function optimize(gIn){
   prefillResources(g);
   let bestGrid=null, bestScore=-1;
 
-  // Seed 1: every buildable tile starts as a market.
+  // Helper: a tile is "locked" by the user only when Chivalry (destroy) is OFF.
+  // With destroy on, user-placed buildings can be demolished, so seeds may
+  // overwrite them.
+  const isLocked = (t) => t.userPlaced && t.building && !optConfig.destroy;
+
+  // Seed 1: every buildable tile starts as a market. Skip user-locked tiles.
   const g1=cloneGrid(g);
-  for(const t of buildablePool(g1)) t.building=BUILD.MARKET;
+  for(const t of buildablePool(g1)) if(!isLocked(t)) t.building=BUILD.MARKET;
   const s1=hillClimb(g1); if(s1>bestScore){bestScore=s1;bestGrid=g1;}
 
   // Seed 2: each tile takes the enabled supplier with the most neighboring resources.
   const g2=cloneGrid(g);
   for(const t of buildablePool(g2)){
+    if(isLocked(t)) continue;
     const sc={};
     if (optConfig.windmill) sc.windmill = supplierLevel(g2,t.r,t.c,'windmill');
     if (optConfig.forge)    sc.forge    = supplierLevel(g2,t.r,t.c,'forge');
@@ -596,7 +658,7 @@ function optimize(gIn){
 
   // Seed 2b: for every candidate market position, build the best legal
   // 1-of-each supplier configuration *around* it, then hill climb.
-  const mkPool = buildablePool(g);
+  const mkPool = buildablePool(g).filter(t=>!isLocked(t));
   for(const mkTile of mkPool){
     const g2b = cloneGrid(g);
     const mk = g2b.tiles[mkTile.r][mkTile.c];
@@ -608,7 +670,7 @@ function optimize(gIn){
     for(const st of candTypes){
       let best={lvl:0, tile:null};
       for(const nb of neighbors(g2b, mk.r, mk.c)){
-        if(!nb.cityId) continue;
+        if(!nb.cityId || isLocked(nb)) continue;
         if(nb.type!==TILE.FIELD && !(nb.type===TILE.FOREST && nb.chopped)) continue;
         if(nb.building) continue;
         const lvl = supplierLevel(g2b, nb.r, nb.c, st);
@@ -623,20 +685,43 @@ function optimize(gIn){
   }
 
   // Seed 3: random restarts — sometimes escapes local optima the seeded starts hit.
+  // Order matters: apply random terrain transforms (chop/destroy) FIRST, THEN
+  // seed roles on the resulting buildable pool. Doing it the other way around
+  // means a territory with no native Field tiles (e.g. all-forest, all-other)
+  // never gets any buildings seeded, and hill-climb has no positive baseline
+  // to refine — single-tile moves to "market" or "sawmill" alone yield 0 stars,
+  // so the search gets stuck at 0.
   const RANDOM_ROLES=[BUILD.MARKET];
   if(optConfig.windmill) RANDOM_ROLES.push(BUILD.WINDMILL);
   if(optConfig.forge)    RANDOM_ROLES.push(BUILD.FORGE);
   if(optConfig.sawmill)  RANDOM_ROLES.push(BUILD.SAWMILL);
   for(let trial=0;trial<80;trial++){
     const g3=cloneGrid(g);
-    for(const t of buildablePool(g3)) t.building=RANDOM_ROLES[Math.floor(Math.random()*RANDOM_ROLES.length)];
-    // Randomize chop decisions on forests too — but only inside city territory.
-    // Forests outside any city can't be chopped (you can't act there at all),
-    // and hillClimb's pool skips them, so a stray chop here would never get undone.
+    // Random terrain transforms inside city territory only — skip user-locked
+    // tiles (those movesFor refuses to change anyway, and bulldozing them here
+    // would corrupt state). When Chivalry is on, locks are lifted so the
+    // optimizer can clear user buildings to free the underlying terrain.
     for(let r=0;r<g3.rows;r++) for(let c=0;c<g3.cols;c++){
       const t=g3.tiles[r][c];
-      if(t.cityId && t.type===TILE.FOREST && Math.random()<0.3){ t.chopped=true; t.building=null; }
+      if(!t.cityId || isLocked(t)) continue;
+      if(t.type===TILE.FOREST && optConfig.chop && Math.random()<0.3){
+        t.chopped=true; t.building=null;
+      }
+      if(t.type===TILE.OTHER && optConfig.destroy && Math.random()<0.6){
+        t.destroyed=true; t.building=null;
+      }
+      // With Chivalry on, also randomly clear user-placed buildings so the
+      // tile becomes a candidate for a higher-value role.
+      if(optConfig.destroy && t.userPlaced && t.building && Math.random()<0.4){
+        t.building=null;
+        // For OTHER tiles, mark destroyed so effType→field; for forest/field,
+        // the underlying terrain is preserved (chopped/grown handled separately).
+        if(t.type===TILE.OTHER) t.destroyed=true;
+      }
     }
+    // Seed random roles on every buildable tile (post-transform). Skip locked.
+    for(const t of buildablePool(g3))
+      if(!isLocked(t)) t.building=RANDOM_ROLES[Math.floor(Math.random()*RANDOM_ROLES.length)];
     const s3=hillClimb(g3); if(s3>bestScore){bestScore=s3;bestGrid=g3;}
   }
   // Strip resource buildings that don't feed any supplier — they don't
@@ -649,6 +734,10 @@ function pruneOrphanResources(g){
   const FEEDS = { farm:BUILD.WINDMILL, mine:BUILD.FORGE, lumberhut:BUILD.SAWMILL };
   for(let r=0;r<g.rows;r++) for(let c=0;c<g.cols;c++){
     const t=g.tiles[r][c];
+    if(t.userPlaced) continue; // user explicitly placed this — never auto-strip
+    // (with Chivalry on, the optimizer may *deliberately* destroy a user-placed
+    //  building during hill climb to free a tile for a higher-value role; that
+    //  shows up as a different t.building afterwards, not as an orphan.)
     const sup=FEEDS[t.building]; if(!sup) continue;
     if(neighbors(g,r,c).some(n=>n.building===sup)) continue;
     // No matching supplier adjacent → resource isn't contributing. Drop it,
@@ -657,6 +746,7 @@ function pruneOrphanResources(g){
     t.building = null;
     t.grown = false;
     t.burned = false;
+    t.destroyed = false;
   }
 }
 const P = { TILE, BUILD, makeGrid, neighbors, validateBoard, effType,
@@ -736,7 +826,8 @@ const PALETTE = [
   { key:'ore',      label:'Ore',      color:'#a87b3f' },
   { key:'water',    label:'Water',    color:'#3d85c6' },
   { key:'city',     label:'City',     color:'#cc0000' },
-  { key:'blocked',  label:'Ruin/Other', color:'#444' },
+  { key:'blocked',  label:'Ruin',     color:'#444' },
+  { key:'other',    label:'Other building', color:'#7d3c98' },
   // Building paints: set appropriate terrain + building in one click.
   { key:'b_farm',      label:'Farm',      color:'#ff8ac4', building:'farm',      terrain:'crop'   },
   { key:'b_mine',      label:'Mine',      color:'#8b5a2b', building:'mine',      terrain:'ore'    },
@@ -749,7 +840,7 @@ const PALETTE = [
 // Display toggles
 const showFlags = { market:true, windmill:true, forge:true, sawmill:true,
                     farm:true, mine:true, lumberhut:true,
-                    chopped:true, grown:true, burned:true, territory:true };
+                    chopped:true, grown:true, burned:true, destroyed:true, territory:true };
 function wireToggles(){
   document.querySelectorAll('.toggle').forEach(cb => {
     cb.addEventListener('change', () => { showFlags[cb.dataset.show] = cb.checked; draw(); });
@@ -1050,6 +1141,21 @@ function draw() {
           lctx.lineTo(ax - sz * 0.7, ay);
           lctx.closePath();
           lctx.fill(); lctx.stroke();
+        }
+        // Destroyed: either an Other-Building tile flagged destroyed, OR a
+        // user-placed building that the optimizer demolished (Chivalry) and
+        // either left empty or replaced with something else.
+        const wasUserDestroyed = t.userBuilding && t.userBuilding !== t.building;
+        if (showFlags.destroyed && ((t.destroyed && t.type === 'other') || wasUserDestroyed)) {
+          // Bottom-left: destroy (purple ✕ — distinct from chop's red ✕).
+          const ax = cx - ox, ay = cy + oy;
+          drawIconBg(ax, ay);
+          lctx.strokeStyle = '#c39bd3';
+          lctx.lineWidth = 2;
+          lctx.beginPath();
+          lctx.moveTo(ax - sz, ay - sz); lctx.lineTo(ax + sz, ay + sz);
+          lctx.moveTo(ax + sz, ay - sz); lctx.lineTo(ax - sz, ay + sz);
+          lctx.stroke();
         }
       }
     }
@@ -1477,7 +1583,7 @@ overlay.addEventListener('click', e => {
   }
 
   // Normal paint
-  if (e.shiftKey) { t.type = P.TILE.FIELD; t.building = null; t.chopped = false; t.grown = false; t.burned = false; t.manualCity = null; }
+  if (e.shiftKey) { t.type = P.TILE.FIELD; t.building = null; t.chopped = false; t.grown = false; t.burned = false; t.destroyed = false; t.userPlaced = false; t.userBuilding = null; t.manualCity = null; }
   else {
     const prevType = t.type;
     const pEntry = PALETTE.find(p => p.key === paintType);
@@ -1494,9 +1600,10 @@ overlay.addEventListener('click', e => {
         flashStatus(`Can't place ${pEntry.label} on ${t.type === P.TILE.ORE ? 'Ore/Mine' : 'Mountain'} tiles.`);
         return;
       }
-      t.type = pEntry.terrain; t.building = pEntry.building; t.chopped = false; t.grown = false; t.burned = false;
+      t.type = pEntry.terrain; t.building = pEntry.building; t.chopped = false; t.grown = false; t.burned = false; t.destroyed = false;
+      t.userPlaced = true; t.userBuilding = pEntry.building; // remember original so destroy markers can render
     } else {
-      t.type = paintType; t.building = null; t.chopped = false; t.grown = false; t.burned = false;
+      t.type = paintType; t.building = null; t.chopped = false; t.grown = false; t.burned = false; t.destroyed = false; t.userPlaced = false; t.userBuilding = null;
     }
     // When placing a City, auto-assign its full 5×5 (24 surrounding tiles) via
     // manualCity. First-come-first-served: don't steal tiles already assigned
@@ -1646,10 +1753,21 @@ document.getElementById('loadExample').onclick = () => {
   for (const tt of ex.tiles) {
     const t = grid.tiles[tt.r][tt.c];
     if (tt.type) t.type = tt.type;
-    if (tt.b) t.building = tt.b;
+    if (tt.b) {
+      t.building = tt.b;
+      // Resource buildings represent existing in-game placements (the user
+      // would have painted these to mark their map). Lock them. Suppliers /
+      // Markets in the example came from a previous optimizer run, so leave
+      // them mutable so re-running the optimizer still works.
+      if (['farm','mine','lumberhut','port'].includes(tt.b)) {
+        t.userPlaced = true;
+        t.userBuilding = tt.b;
+      }
+    }
     if (tt.chop) t.chopped = true;
     if (tt.gr) t.grown = true;
     if (tt.bu) t.burned = true;
+    if (tt.ds) t.destroyed = true;
     if (tt.mc) t.manualCity = tt.mc;
   }
   // Restore calibration so the grid lines up with the saved screenshot.
@@ -1794,12 +1912,16 @@ document.getElementById('clearAll').onclick = () => {
 document.getElementById('clearAssign').onclick = () => {
   for (let r=0; r<grid.rows; r++) for (let c=0; c<grid.cols; c++) {
     const t = grid.tiles[r][c];
-    if (['windmill','forge','sawmill','market'].includes(t.building)) t.building = null;
+    if (['windmill','forge','sawmill','market'].includes(t.building)) {
+      t.building = null;
+      t.userPlaced = false;
+      t.userBuilding = null;
+    }
     // Wipe optimizer-driven terrain transformations so the user sees their
     // painted tiles again. Resource buildings (farm/mine/lumberhut) on those
     // transformed tiles came from the optimizer and go with them.
-    if (t.grown || t.burned || t.chopped) {
-      t.chopped = false; t.grown = false; t.burned = false;
+    if (t.grown || t.burned || t.chopped || t.destroyed) {
+      t.chopped = false; t.grown = false; t.burned = false; t.destroyed = false;
       t.building = null;
     }
   }
