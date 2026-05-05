@@ -23,7 +23,9 @@ Please use [GitHub Issues](https://github.com/alkprojects/Polytopia-Market-Locat
 
 ## License
 
-[MIT](LICENSE) © Alex Koskinen
+© 2026 Alex Koskinen. All rights reserved.
+
+This source is published for transparency and bug reports. No license to copy, modify, redistribute, or create derivative works is granted. If you'd like to use any part of it, please open an issue to ask.
 
 ## Disclaimer
 
